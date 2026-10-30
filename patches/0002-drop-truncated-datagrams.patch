@@ -1,0 +1,31 @@
+From 7795abdfd9cc4c49875ca9312cdf32c7b0be90bd Mon Sep 17 00:00:00 2001
+From: Sheng <hsdai22@m.fudan.edu.cn>
+Subject: [PATCH] nghttpx: Drop truncated QUIC input before interpreting it
+
+Upstream-Commit: 7795abdfd9cc4c49875ca9312cdf32c7b0be90bd
+Upstream-Branch: ASheng1019/nghttp2 dev/drop-truncated-quic-input
+Status: PR creation rejected by GitHub; not yet submitted
+Backport-to: nghttp2 1.70.0 (production fix only)
+
+---
+diff --git a/src/shrpx_quic_listener.cc b/src/shrpx_quic_listener.cc
+index 77dcd7b1..beacb4e9 100644
+--- a/src/shrpx_quic_listener.cc
++++ b/src/shrpx_quic_listener.cc
+@@ -73,6 +73,7 @@ void QUICListener::on_read() {
+   auto quic_conn_handler = worker_->get_quic_connection_handler();
+ 
+   for (; pktcnt < 64;) {
++    msg.msg_flags = 0;
+     msg.msg_namelen = sizeof(ss);
+     msg.msg_controllen = sizeof(msg_ctrl);
+ 
+@@ -82,7 +83,7 @@ void QUICListener::on_read() {
+     }
+ 
+     // Packets less than 21 bytes never be a valid QUIC packet.
+-    if (nread < 21) {
++    if (nread < 21 || (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {
+       ++pktcnt;
+ 
+       continue;
