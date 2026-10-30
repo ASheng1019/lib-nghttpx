@@ -1,0 +1,22 @@
+From 396cec4427b89e1a20aaadd7e07514d182a57dbe Mon Sep 17 00:00:00 2001
+From: Sheng <hsdai22@m.fudan.edu.cn>
+Date: Thu, 22 Oct 2026 20:17:50 +0800
+Subject: [PATCH] nghttpx: Preserve Retry status after decoding the packet header
+
+Upstream-PR: https://github.com/nghttp2/nghttp2/pull/2933
+Backport-to: nghttp2 1.70.0 (production fix only; upstream tests live in the PR)
+
+---
+diff --git a/src/shrpx_http3_upstream.cc b/src/shrpx_http3_upstream.cc
+index c163c50e..c7ed6772 100644
+--- a/src/shrpx_http3_upstream.cc
++++ b/src/shrpx_http3_upstream.cc
+@@ -1785,7 +1785,7 @@ Http3Upstream::on_read(const UpstreamAddr *faddr, const Address &remote_addr,
+       }
+ 
+       // Overwrite error if any is set
+-      ngtcp2_ccerr_set_liberr(&last_error_, rv, nullptr, 0);
++      ngtcp2_ccerr_set_liberr(&last_error_, NGTCP2_ERR_RETRY, nullptr, 0);
+ 
+       (void)quic_conn_handler->send_retry(
+         handler_->get_upstream_addr(), vc.version, {vc.dcid, vc.dcidlen},
