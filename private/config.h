@@ -1,0 +1,25 @@
+#ifndef QUIC_NATIVE_NGHTTP2_CONFIG_H
+#define QUIC_NATIVE_NGHTTP2_CONFIG_H
+#define NGHTTP2_NORETURN __attribute__((noreturn))
+#define ENABLE_HTTP3 1
+#define HAVE_LIBEV 1
+#define UNIKRAFT_NGHTTPX 1
+#define PKGLIBDIR "/lib"
+#define IPTOS_ECN_MASK 0x03
+#define HAVE__EXIT 1
+#define HAVE_ACCEPT4 1
+#define HAVE_CLOCK_GETTIME 1
+#define HAVE_PIPE2 1
+#define HAVE_DECL_CLOCK_MONOTONIC 1
+#define HAVE_ARPA_INET_H 1
+#define HAVE_FCNTL_H 1
+#define HAVE_INTTYPES_H 1
+#define HAVE_LIMITS_H 1
+#define HAVE_NETDB_H 1
+#define HAVE_NETINET_IN_H 1
+#define HAVE_PWD_H 1
+#define HAVE_SYS_SOCKET_H 1
+#define HAVE_SYS_TIME_H 1
+#define HAVE_SYSLOG_H 1
+#define HAVE_UNISTD_H 1
+#endif

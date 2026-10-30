@@ -1,0 +1,10 @@
+config LIBNGHTTPX
+	bool "nghttpx HTTP/3 reverse proxy (1.70.0)"
+	depends on ARCH_ARM_64 && LIBMUSL && LIBCXX
+	depends on LIBNGHTTP2 && LIBNGHTTP3 && LIBNGTCP2_CRYPTO_OSSL
+	depends on LIBEV && LIBCARES && LIBZLIB && LIBLWIP
+	depends on (LWIP_PINNED21X || LWIP_PINNED22X) && LWIP_NETBUF_RECVINFO
+	depends on LIBPOSIX_PIPE && LIBPOSIX_UNIXSOCKET
+	help
+	  Single-worker HTTP/3 frontend with HTTP/1 and HTTP/2 backends.
+	  Requires a deployment initrd with configuration, certificate and seed.

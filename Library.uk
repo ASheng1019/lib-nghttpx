@@ -1,0 +1,5 @@
+name := "nghttpx"
+description := "nghttpx single-worker HTTP/3 reverse proxy"
+version := 1.70.0 sha256:e05cb1388eaca3830aded4ccf20044b6e1ac1a61411dcca11b0437c4285c8bc2 https://github.com/nghttp2/nghttp2/releases/download/v1.70.0/nghttp2-1.70.0.tar.xz
+gitrepo := "https://github.com/nghttp2/nghttp2.git"
+license := "MIT"
