@@ -1,0 +1,153 @@
+From: Sheng <hsdai22@m.fudan.edu.cn>
+Subject: [PATCH] Adapt service entry, supported profile and bounded shutdown
+
+Target: nghttp2-1.70.0 after independent Retry/truncation fixes.
+Status: Unikraft platform adaptation; not submitted upstream.
+
+diff --git a/src/shrpx.cc b/src/shrpx.cc
+index e514384..30816e7 100644
+--- a/src/shrpx.cc
++++ b/src/shrpx.cc
+@@ -1429,6 +1429,17 @@ fork_worker_process(const std::vector<InheritedUNIXDomainAddr> &iaddrs
+       .quic_lingering_worker_processes = std::move(quic_lwps),
+ #endif // defined(ENABLE_HTTP3)
+     };
++#ifdef UNIKRAFT_NGHTTPX
++    auto native_result = worker_process_event_loop(&wpconf);
++    close(ipc_fd[0]);
++    close(ipc_fd[1]);
++    close(quic_ipc_fd[0]);
++    close(quic_ipc_fd[1]);
++    if (!native_result)
++      return std::unexpected{native_result.error()};
++    Log{NOTICE} << "Native worker stopped and resources released";
++    return WorkerProcessForkResult{};
++#else
+     if (!worker_process_event_loop(&wpconf)) {
+       Log{FATAL} << "Worker process returned error";
+ 
+@@ -1447,6 +1458,7 @@ fork_worker_process(const std::vector<InheritedUNIXDomainAddr> &iaddrs
+     } else {
+       nghttp2_Exit(EXIT_SUCCESS);
+     }
++#endif
+   }
+ 
+   // parent process
+@@ -1567,6 +1579,14 @@ std::expected<void, Error> event_loop() {
+     return std::unexpected{maybe_fork_res.error()};
+   }
+ 
++#ifdef UNIKRAFT_NGHTTPX
++  shutdown_worker_process_ready_ipc_watcher(loop);
++  close(worker_process_ready_ipc_fd[0]);
++  close(worker_process_ready_ipc_fd[1]);
++  ev_loop_destroy(loop);
++  return {};
++#endif
++
+   const auto &fork_res = *maybe_fork_res;
+ 
+   ev_timer_init(&worker_process_grace_period_timer,
+@@ -5234,6 +5254,27 @@ int main(int argc, char **argv) {
+     return -1;
+   }
+ 
++#ifdef UNIKRAFT_NGHTTPX
++  auto *native_config = mod_config();
++  // This native service exposes HTTP/3 only. process_options creates a
++  // default TCP frontend when the user supplies only a QUIC frontend.
++  native_config->conn.listener.addrs.clear();
++  if (!native_config->single_process || !native_config->single_thread ||
++      native_config->num_worker != 1 || native_config->daemon ||
++      !native_config->user.empty() ||
++      native_config->conn.quic_listener.addrs.empty() ||
++      native_config->quic.upstream.early_data) {
++    Log{FATAL} << "Native mode requires single-process, one worker, IPv4/IPv6 "
++                  "QUIC listeners, no user/daemon/early-data";
++    return -1;
++  }
++  const auto &native_addr = native_config->conn.quic_listener.addrs.front();
++  if (native_addr.family != AF_INET && native_addr.family != AF_INET6) {
++    Log{FATAL} << "Native QUIC listener requires an IPv4 or IPv6 address";
++    return -1;
++  }
++#endif
++
+   if (!event_loop()) {
+     return -1;
+   }
+@@ -5245,4 +5286,6 @@ int main(int argc, char **argv) {
+ 
+ } // namespace shrpx
+ 
+-int main(int argc, char **argv) { return run_app(shrpx::main, argc, argv); }
++int nghttpx_main(int argc, char **argv) {
++  return run_app(shrpx::main, argc, argv);
++}
+diff --git a/src/shrpx.h b/src/shrpx.h
+index 95160e7..18a9364 100644
+--- a/src/shrpx.h
++++ b/src/shrpx.h
+@@ -38,7 +38,10 @@
+ 
+ #define NGHTTP2_NO_SSIZE_T
+ 
+-#ifndef HAVE__EXIT
++#ifdef UNIKRAFT_NGHTTPX
++#include "native_runtime.h"
++#define nghttp2_Exit(status) native_fatal_exit(status)
++#elif !defined(HAVE__EXIT)
+ #  define nghttp2_Exit(status) _exit(status)
+ #else // defined(HAVE__EXIT)
+ #  define nghttp2_Exit(status) _Exit(status)
+diff --git a/src/shrpx_worker_process.cc b/src/shrpx_worker_process.cc
+index 4e620b6..d7dcfa0 100644
+--- a/src/shrpx_worker_process.cc
++++ b/src/shrpx_worker_process.cc
+@@ -67,6 +67,10 @@
+ 
+ using namespace nghttp2;
+ 
++#ifdef UNIKRAFT_NGHTTPX
++#include "native_runtime.h"
++#endif
++
+ namespace shrpx {
+ 
+ namespace {
+@@ -678,7 +682,20 @@ worker_process_event_loop(WorkerProcessConfig *wpconf) {
+     return rv;
+   }
+ 
++#ifdef UNIKRAFT_NGHTTPX
++  if (!native_watch_stop(
++          loop,
++          [](void *p) {
++            graceful_shutdown(static_cast<ConnectionHandler *>(p));
++          },
++          conn_handler.get())) {
++    return std::unexpected{Error::LIBC};
++  }
++#endif
+   ev_run(loop, 0);
++#ifdef UNIKRAFT_NGHTTPX
++  native_unwatch_stop(loop);
++#endif
+ 
+   // Destroy SSL_CTX held in conn_handler before killing neverbleed
+   // daemon.  Otherwise priv_rsa_finish yields "write error" and
+diff --git a/src/util.cc b/src/util.cc
+index 8fe2dee..10f8cac 100644
+--- a/src/util.cc
++++ b/src/util.cc
+@@ -1821,6 +1821,9 @@ std::expected<void, Error> daemonize(int nochdir, int noclose) {
+   }
+ 
+   return {};
++#elif defined(UNIKRAFT_NGHTTPX)
++  errno = ENOSYS;
++  return std::unexpected{Error::LIBC};
+ #else  // !defined(__APPLE__) && !defined(__sgi)
+   if (daemon(nochdir, noclose) != 0) {
+     return std::unexpected{Error::LIBC};
