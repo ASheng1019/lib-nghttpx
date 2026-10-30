@@ -1,8 +1,8 @@
-From 7795abdfd9cc4c49875ca9312cdf32c7b0be90bd Mon Sep 17 00:00:00 2001
+From 173e453ba500d4a77dc10f9109f86bc7aebd7f2a Mon Sep 17 00:00:00 2001
 From: Sheng <hsdai22@m.fudan.edu.cn>
 Subject: [PATCH] nghttpx: Drop truncated QUIC input before interpreting it
 
-Upstream-Commit: 7795abdfd9cc4c49875ca9312cdf32c7b0be90bd
+Upstream-Commit: 173e453ba500d4a77dc10f9109f86bc7aebd7f2a
 Upstream-Branch: ASheng1019/nghttp2 dev/drop-truncated-quic-input
 Status: PR creation rejected by GitHub; not yet submitted
 Backport-to: nghttp2 1.70.0 (production fix only)
