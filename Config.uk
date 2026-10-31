@@ -7,4 +7,5 @@ config LIBNGHTTPX
 	depends on LIBPOSIX_PIPE && LIBPOSIX_UNIXSOCKET
 	help
 	  Single-worker HTTP/3 frontend with HTTP/1 and HTTP/2 backends.
-	  Requires a deployment initrd with configuration, certificate and seed.
+	  Requires configuration, certificates, initialized networking and realtime.
+	  Time providers and management endpoints belong to the calling application.

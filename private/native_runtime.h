@@ -2,9 +2,10 @@
 #pragma once
 [[noreturn]] void native_fatal_exit(int status);
 #include <ev.h>
-bool native_boot_init();
-bool native_watch_stop(struct ev_loop *, void (*)(void *), void *);
-void native_unwatch_stop(struct ev_loop *);
+struct uk_nghttpx_options;
+bool native_boot_init(const uk_nghttpx_options *);
+bool native_service_ready(struct ev_loop *, void (*)(void *), void *);
+void native_service_stopped(struct ev_loop *);
 
 bool native_ecn_enabled();
 bool native_pmtud_enabled();

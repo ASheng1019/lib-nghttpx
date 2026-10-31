@@ -1,5 +1,5 @@
 From: Sheng <hsdai22@m.fudan.edu.cn>
-Subject: [PATCH] Adapt service entry, supported profile and bounded shutdown
+Subject: [PATCH] Adapt service entry, supported profile and lifecycle hooks
 
 Target: nghttp2-1.70.0 after independent Retry/truncation fixes.
 Status: Unikraft platform adaptation; not submitted upstream.
@@ -121,7 +121,7 @@ index 4e620b6..d7dcfa0 100644
    }
  
 +#ifdef UNIKRAFT_NGHTTPX
-+  if (!native_watch_stop(
++  if (!native_service_ready(
 +          loop,
 +          [](void *p) {
 +            graceful_shutdown(static_cast<ConnectionHandler *>(p));
@@ -132,7 +132,7 @@ index 4e620b6..d7dcfa0 100644
 +#endif
    ev_run(loop, 0);
 +#ifdef UNIKRAFT_NGHTTPX
-+  native_unwatch_stop(loop);
++  native_service_stopped(loop);
 +#endif
  
    // Destroy SSL_CTX held in conn_handler before killing neverbleed

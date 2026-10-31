@@ -11,7 +11,6 @@ LIBNGHTTPX_CXXINCLUDES-y += -I$(LIBNGHTTPX_BASE)/private -I$(LIBNGHTTPX_BASE)/in
 LIBNGHTTPX_CINCLUDES-y += $(LIBNGHTTPX_CXXINCLUDES-y)
 CINCLUDES-$(CONFIG_LIBNGHTTPX) += -I$(LIBNGHTTPX_BASE)/include
 CXXINCLUDES-$(CONFIG_LIBNGHTTPX) += -I$(LIBNGHTTPX_BASE)/include
-LDFLAGS-$(CONFIG_LIBNGHTTPX) += -Wl,--wrap=clock_gettime -Wl,--wrap=gettimeofday -Wl,--wrap=time
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_SRC)/src/util.cc
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_SRC)/src/http2.cc
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_SRC)/src/timegm.c
@@ -65,5 +64,4 @@ LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_SRC)/third-party/llhttp/src/api.c
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_SRC)/third-party/llhttp/src/http.c
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_SRC)/third-party/llhttp/src/llhttp.c
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_BASE)/native_runtime.cc
-LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_BASE)/native_network.c
 LIBNGHTTPX_SRCS-y += $(LIBNGHTTPX_BASE)/entry.cc

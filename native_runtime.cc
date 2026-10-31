@@ -1,102 +1,30 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Trusted boot epoch is an application contract, not a replacement for a
-// platform RTC.
 #include "native_runtime.h"
-#include <chrono>
-#include <cstdio>
-#include <cstring>
-#include <cerrno>
-#include <ctime>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <cstdint>
-#include <string>
-#include <map>
-#include <cstdlib>
-#include <limits>
-#include "native_network.h"
-#include <fcntl.h>
-#include <uk/alloc.h>
-#include <uk/pm.h>
 #include "shrpx_connection_handler.h"
 #include "shrpx_worker.h"
+#include <arpa/inet.h>
+#include <cerrno>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <map>
+#include <nghttpx/unikraft.h>
+#include <string>
+#include <unistd.h>
+// Include core C headers after C++ templates (__true/__false are core macros).
+#include <uk/pm.h>
+struct uk_nghttpx_control {
+	void (*shutdown)(void *);
+	void *arg;
+	bool stopping;
+};
 namespace
 {
-int64_t epoch_offset;
-bool anchored;
-char stop_token[65];
-ev_io stop_watcher;
-int stop_fd = -1;
-sockaddr_in control_addr{};
-unsigned drain_seconds = 15;
-ev_timer drain_timer;
-bool draining = false;
-bool ecn_enabled = false, pmtud_enabled = false;
-unsigned max_payload = 1200;
-std::string ipv6_address;
-
-void (*stop_callback)(void *);
-void *stop_arg;
-void drain_expired(struct ev_loop *, ev_timer *, int)
-{
-	std::puts("NATIVE_NGHTTPX DRAIN_DEADLINE immediate_vm_shutdown");
-	native_fatal_exit(2);
-}
-void receive_stop(struct ev_loop *loop, ev_io *, int)
-{
-	char message[128];
-	sockaddr_in peer{};
-	socklen_t peer_len = sizeof(peer);
-	auto count = recvfrom(stop_fd, message, sizeof(message), 0,
-			      reinterpret_cast<sockaddr *>(&peer), &peer_len);
-	if (count == 70 && !memcmp(message, "STATS ", 6) &&
-	    !memcmp(message + 6, stop_token, 64)) {
-		auto handler =
-		    static_cast<shrpx::ConnectionHandler *>(stop_arg);
-		auto worker = handler->get_single_worker();
-		auto stat = worker->get_worker_stat();
-		long long used = -1, peak = -1, enomem = -1;
-#if CONFIG_LIBUKALLOC_IFSTATS_GLOBAL
-		uk_alloc_stats allocator{};
-		uk_alloc_stats_get_global(&allocator);
-		used = allocator.cur_mem_use;
-		peak = allocator.max_mem_use;
-		enomem = allocator.nb_enomem;
-#endif
-		int descriptors = 0;
-		for (int fd = 0; fd < 4096; ++fd)
-			if (fcntl(fd, F_GETFD) >= 0)
-				++descriptors;
-		char response[512];
-		int length =
-		    snprintf(response, sizeof(response),
-			     "{\"heap_used\":%lld,\"heap_peak\":%lld,"
-			     "\"available\":%llu,\"enomem\":%lld,"
-			     "\"connections\":%zu,\"close_waits\":%zu,\"fds\":%"
-			     "d,\"fd_scan_limit\":4096}",
-			     used, peak,
-			     static_cast<unsigned long long>(
-				 uk_alloc_availmem(uk_alloc_get_default())),
-			     enomem, stat->num_connections,
-			     stat->num_close_waits, descriptors);
-		if (length > 0 &&
-		    static_cast<size_t>(length) < sizeof(response))
-			sendto(stop_fd, response, length, 0,
-			       reinterpret_cast<sockaddr *>(&peer), peer_len);
-		return;
-	}
-	if (count == 64 && !memcmp(message, stop_token, 64)) {
-		std::puts("NATIVE_NGHTTPX STOP authenticated");
-		if (draining)
-			return;
-		draining = true;
-		ev_io_stop(loop, &stop_watcher);
-		ev_timer_start(loop, &drain_timer);
-		stop_callback(stop_arg);
-	}
-}
+uk_nghttpx_options settings{};
+uk_nghttpx_control control{};
 } // namespace
 [[noreturn]] void native_fatal_exit(int status)
 {
@@ -107,40 +35,6 @@ void receive_stop(struct ev_loop *loop, ev_io *, int)
 	       status);
 	fflush(nullptr);
 	uk_pm_shutdown(UK_PM_SHUTDOWN_OP_SYSHALT);
-}
-extern "C" int __real_clock_gettime(clockid_t, timespec *);
-extern "C" int __wrap_clock_gettime(clockid_t clock, timespec *ts)
-{
-	if (!anchored ||
-	    (clock != CLOCK_REALTIME && clock != CLOCK_REALTIME_COARSE))
-		return __real_clock_gettime(clock, ts);
-	if (__real_clock_gettime(CLOCK_MONOTONIC, ts))
-		return -1;
-	int64_t n = static_cast<int64_t>(ts->tv_sec) * 1000000000 +
-		    ts->tv_nsec + epoch_offset;
-	ts->tv_sec = n / 1000000000;
-	ts->tv_nsec = n % 1000000000;
-	return 0;
-}
-extern "C" int __wrap_gettimeofday(timeval *tv, void *)
-{
-	timespec ts;
-	if (__wrap_clock_gettime(CLOCK_REALTIME, &ts))
-		return -1;
-	if (tv) {
-		tv->tv_sec = ts.tv_sec;
-		tv->tv_usec = ts.tv_nsec / 1000;
-	}
-	return 0;
-}
-extern "C" time_t __wrap_time(time_t *out)
-{
-	timespec ts;
-	if (__wrap_clock_gettime(CLOCK_REALTIME, &ts))
-		return -1;
-	if (out)
-		*out = ts.tv_sec;
-	return ts.tv_sec;
 }
 namespace
 {
@@ -230,7 +124,6 @@ bool check_profile()
 			return false;
 		}
 	}
-	sockaddr_in frontend{};
 	for (const auto &[key, value] : options) {
 		if (required.contains(key))
 			continue;
@@ -248,8 +141,6 @@ bool check_profile()
 				host = host.substr(1, host.size() - 2);
 			sockaddr_in candidate{};
 			bool v4 = endpoint(address, candidate, true);
-			if (v4)
-				frontend = candidate;
 			valid =
 			    valid && (v4 || (comma != std::string::npos &&
 					     inet_pton(AF_INET6, host.c_str(),
@@ -329,128 +220,75 @@ bool check_profile()
 			return false;
 		}
 	}
-	control_addr = frontend;
-	control_addr.sin_port = htons(ntohs(frontend.sin_port) == 65535
-					  ? 4434
-					  : ntohs(frontend.sin_port) + 1);
-	std::multimap<std::string, std::string> runtime;
-	if (!read_options("/native-runtime.conf", runtime, true))
-		return false;
-	for (const auto &[key, value] : runtime) {
-		if (key == "control") {
-			if (!endpoint(value, control_addr))
-				return false;
-		} else if (key == "ipv6-address") {
-			in6_addr address;
-			if (inet_pton(AF_INET6, value.c_str(), &address) != 1)
-				return false;
-			ipv6_address = value;
-		} else if (key == "ecn" || key == "pmtud") {
-			if (value != "yes" && value != "no")
-				return false;
-			(key == "ecn" ? ecn_enabled : pmtud_enabled) =
-			    value == "yes";
-		} else if (key == "max-udp-payload") {
-			unsigned long long parsed;
-			if (!number(value, 1200, 1452, &parsed))
-				return false;
-			max_payload = parsed;
-		} else if (key == "drain-seconds") {
-			unsigned long long parsed;
-			if (!number(value, 1, 300, &parsed))
-				return false;
-			drain_seconds = parsed;
-		} else {
-			printf("NATIVE_NGHTTPX RUNTIME rejected key=%s\n",
-			       key.c_str());
-			return false;
-		}
-	}
-	if (control_addr.sin_addr.s_addr == INADDR_ANY)
-		return false;
-	if (control_addr.sin_addr.s_addr == frontend.sin_addr.s_addr &&
-	    control_addr.sin_port == frontend.sin_port)
-		return false;
 	std::puts("NATIVE_NGHTTPX CONFIG profile=single-worker-h3 PASS");
 	return true;
 }
 } // namespace
-bool native_boot_init()
+bool native_boot_init(const uk_nghttpx_options *options)
 {
-	if (!check_profile())
+	settings = options ? *options : uk_nghttpx_options{};
+	if (!settings.max_udp_payload)
+		settings.max_udp_payload = 1200;
+	if (settings.max_udp_payload < 1200 ||
+	    settings.max_udp_payload > 1452 ||
+	    (!!settings.on_ready != !!settings.on_close) || !check_profile())
 		return false;
-	if (native_network_init(ipv6_address.c_str()))
+	timespec now;
+	if (clock_gettime(CLOCK_REALTIME, &now) || now.tv_sec < 1704067200 ||
+	    now.tv_sec > 4102444800LL) {
+		std::puts("NATIVE_NGHTTPX TIME unavailable: supply a "
+			  "platform/deployment clock");
 		return false;
-	FILE *f = fopen("/native-boot.txt", "r");
-	unsigned long long epoch = 0;
-	char epoch_text[32], extra;
-	if (!f)
-		return false;
-	int count = fscanf(f, "%31s %64s %c", epoch_text, stop_token, &extra);
-	fclose(f);
-	if (count != 2 ||
-	    !number(epoch_text, 1704067200, 4102444800ULL, &epoch) ||
-	    strlen(stop_token) != 64 ||
-	    strspn(stop_token, "0123456789abcdefABCDEF") != 64)
-		return false;
-	timespec mono;
-	if (__real_clock_gettime(CLOCK_MONOTONIC, &mono))
-		return false;
-	epoch_offset = epoch * 1000000000LL -
-		       static_cast<int64_t>(mono.tv_sec) * 1000000000 -
-		       mono.tv_nsec;
-	anchored = true;
+	}
 	auto system_epoch =
 	    std::chrono::duration_cast<std::chrono::seconds>(
 		std::chrono::system_clock::now().time_since_epoch())
 		.count();
-	if (system_epoch < epoch || system_epoch > epoch + 1)
-		return false;
-	printf(
-	    "NATIVE_NGHTTPX TIME trusted_boot_epoch=%llu system_epoch=%lld\n",
-	    epoch, static_cast<long long>(system_epoch));
-	return true;
-}
-bool native_watch_stop(struct ev_loop *loop, void (*callback)(void *),
-		       void *arg)
-{
-	stop_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
-	if (stop_fd < 0)
-		return false;
-	if (bind(stop_fd, reinterpret_cast<sockaddr *>(&control_addr),
-		 sizeof(control_addr))) {
-		close(stop_fd);
-		stop_fd = -1;
+	if (system_epoch < now.tv_sec - 1 || system_epoch > now.tv_sec + 1) {
+		std::puts("NATIVE_NGHTTPX TIME inconsistent C/C++ realtime");
 		return false;
 	}
-	stop_callback = callback;
-	stop_arg = arg;
-	ev_io_init(&stop_watcher, receive_stop, stop_fd, EV_READ);
-	ev_timer_init(&drain_timer, drain_expired, drain_seconds, 0);
-	ev_io_start(loop, &stop_watcher);
-	printf("NATIVE_NGHTTPX READY control=%u drain_seconds=%u\n",
-	       ntohs(control_addr.sin_port), drain_seconds);
 	return true;
 }
-void native_unwatch_stop(struct ev_loop *loop)
+bool native_service_ready(struct ev_loop *loop, void (*shutdown)(void *),
+			  void *arg)
 {
-	ev_timer_stop(loop, &drain_timer);
-	if (stop_fd >= 0) {
-		ev_io_stop(loop, &stop_watcher);
-		close(stop_fd);
-		stop_fd = -1;
-	}
+	control = {shutdown, arg, false};
+	if (settings.on_ready &&
+	    settings.on_ready(loop, &control, settings.user))
+		return false;
+	std::printf("NATIVE_NGHTTPX READY management=%s\n",
+		    settings.on_ready ? "external" : "disabled");
+	return true;
+}
+void native_service_stopped(struct ev_loop *loop)
+{
+	if (settings.on_close)
+		settings.on_close(loop, settings.user);
+	control = {};
+}
+extern "C" void uk_nghttpx_shutdown(uk_nghttpx_control *handle)
+{
+	auto *c = handle;
+	if (c != &control || !c->shutdown || c->stopping)
+		return;
+	c->stopping = true;
+	c->shutdown(c->arg);
+}
+extern "C" int uk_nghttpx_get_stats(const uk_nghttpx_control *handle,
+				    uk_nghttpx_stats *out)
+{
+	const auto *c = handle;
+	if (c != &control || !c->arg || !out)
+		return -1;
+	auto stat = static_cast<shrpx::ConnectionHandler *>(c->arg)
+			->get_single_worker()
+			->get_worker_stat();
+	out->connections = stat->num_connections;
+	out->close_waits = stat->num_close_waits;
+	return 0;
 }
 
-bool native_ecn_enabled()
-{
-	return ecn_enabled;
-}
-bool native_pmtud_enabled()
-{
-	return pmtud_enabled;
-}
-unsigned native_max_payload()
-{
-	return max_payload;
-}
+bool native_ecn_enabled() { return settings.ecn != 0; }
+bool native_pmtud_enabled() { return settings.pmtud != 0; }
+unsigned native_max_payload() { return settings.max_udp_payload; }

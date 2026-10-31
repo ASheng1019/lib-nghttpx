@@ -6,13 +6,13 @@
 extern int nghttpx_main(int, char **);
 extern "C" unsigned native_openssl_armcap_detected(void) __attribute__((weak));
 extern "C" unsigned native_openssl_armcap_active(void) __attribute__((weak));
-int uk_nghttpx_run(void)
+int uk_nghttpx_run(const uk_nghttpx_options *options)
 {
 	setvbuf(stdout, nullptr, _IONBF, 0);
 	setvbuf(stderr, nullptr, _IONBF, 0);
-	if (!native_boot_init()) {
+	if (!native_boot_init(options)) {
 		std::puts(
-		    "NATIVE_NGHTTPX FAIL boot time/control configuration");
+		    "NATIVE_NGHTTPX FAIL profile or realtime configuration");
 		return 1;
 	}
 	if (native_openssl_armcap_detected && native_openssl_armcap_active)
